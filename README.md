@@ -1,82 +1,224 @@
-# *CLIF Project Title*
+# CLIF Post–Lung Cancer Resection Respiratory Recovery Project
 
 ## CLIF VERSION 
 
-[major].[minor]
+1.0
+
+---
 
 ## Objective
 
-*Describe the project objective*
+To evaluate whether long-term ambient air pollution exposure (PM₂.₅ and NO₂) is associated with postoperative respiratory recovery severity among patients undergoing lung cancer resection who require ICU care.
 
-## Required CLIF tables and fields
+This project integrates high-resolution CLIF ICU physiologic data with preoperative environmental exposure estimates to quantify:
 
-Please refer to the [CLIF data dictionary](https://clif-icu.com/data-dictionary), [CLIF Tools](https://clif-icu.com/tools), [ETL Guide](https://clif-icu.com/etl-guide), and [specific table contacts](https://github.com/clif-consortium/CLIF?tab=readme-ov-file#relational-clif) for more information on constructing the required tables and fields. 
+- Respiratory support at ICU admission
+- Early ventilatory trajectory and escalation within 24 hours
+- Duration of invasive mechanical ventilation
+- Development of postoperative pulmonary complications (PPCs)
+- ICU length of stay
+- In-hospital mortality
 
-*List all required tables for the project here, and provide a brief rationale for why they are required.*
+We hypothesize that greater chronic pollution burden is associated with more severe postoperative respiratory recovery.
 
-Example:
+---
+
+## Required CLIF Tables and Fields
+
+Please refer to the [CLIF data dictionary](https://clif-icu.com/data-dictionary), [CLIF Tools](https://clif-icu.com/tools), [ETL Guide](https://clif-icu.com/etl-guide), and [specific table contacts](https://github.com/clif-consortium/CLIF?tab=readme-ov-file#relational-clif) for more information on constructing the required tables and fields.
+
 The following tables are required:
-1. **patient**: `patient_id`, `race_category`, `ethnicity_category`, `sex_category`
-2. **hospitalization**: `patient_id`, `hospitalization_id`, `admission_dttm`, `discharge_dttm`, `age_at_admission`
-3. **vitals**: `hospitalization_id`, `recorded_dttm`, `vital_category`, `vital_value`
-   - `vital_category` = 'heart_rate', 'resp_rate', 'sbp', 'dbp', 'map', 'resp_rate', 'spo2'
-4. **labs**: `hospitalization_id`, `lab_result_dttm`, `lab_category`, `lab_value`
-   - `lab_category` = 'lactate'
-5. **medication_admin_continuous**: `hospitalization_id`, `admin_dttm`, `med_name`, `med_category`, `med_dose`, `med_dose_unit`
-   - `med_category` = "norepinephrine", "epinephrine", "phenylephrine", "vasopressin", "dopamine", "angiotensin", "nicardipine", "nitroprusside", "clevidipine", "cisatracurium"
-6. **respiratory_support**: `hospitalization_id`, `recorded_dttm`, `device_category`, `mode_category`, `tracheostomy`, `fio2_set`, `lpm_set`, `resp_rate_set`, `peep_set`, `resp_rate_obs`
 
-For Python users, the [clifpy](https://common-longitudinal-icu-data-format.github.io/clifpy/) package provides essential utilities for working with CLIF data, including:
-- Key features: outlier handling, encounter stitching, wide data creation, and more
-- Advanced features: SOFA score computation, respiratory support waterfall, medication unit conversion, and more
+### 1. **patient**
+- `patient_id`
+- `birth_date`
+- `sex_category`
+- `race_category`
+- `ethnicity_category`
 
-See the [clifpy user guide](https://common-longitudinal-icu-data-format.github.io/clifpy/user-guide/) for detailed documentation.
+Used to determine age and demographic covariates.
 
-## Cohort identification
-*Describe study cohort inclusion and exclusion criteria here*
+---
+
+### 2. **hospitalization**
+- `patient_id`
+- `hospitalization_id`
+- `admission_dttm`
+- `discharge_dttm`
+- `age_at_admission`
+- `zipcode_five_digit`
+- `zipcode_nine_digit`
+- `census_tract`
+- `county_code`
+
+Used for:
+- Study period restriction
+- Age calculation
+- Geographic linkage for air pollution exposure assignment
+
+---
+
+### 3. **adt**
+- `hospitalization_id`
+- `in_dttm`
+- `out_dttm`
+- `location_category`
+
+Used to:
+- Identify ICU admissions
+- Determine ICU admission occurring after lung resection
+- Define ICU length of stay
+- Anchor index time (t0)
+
+---
+
+### 4. **hospital_diagnosis**
+- `hospitalization_id`
+- `icd_code`
+- `poa_present`
+- `diagnosis_dttm`
+
+Used to:
+- Identify lung cancer diagnosis
+- Require present-on-admission flag (`poa_present == 1`)
+- Ensure cancer predates hospitalization
+
+---
+
+### 5. **patient_procedures**
+- `hospitalization_id`
+- `procedure_code`
+- `procedure_code_type`
+- `procedure_billed_dttm`
+- `procedure_dttm`
+
+Used to:
+- Identify lung cancer resection procedures (lobectomy, segmentectomy, pneumonectomy, wedge resection)
+- Establish temporal sequence (procedure must occur before ICU admission)
+
+---
+
+### 6. **respiratory_support**
+- `hospitalization_id`
+- `recorded_dttm`
+- `device_category`
+- `mode_category`
+- `fio2_set`
+- `peep_set`
+- `resp_rate_set`
+- `tidal_volume_set`
+- `plateau_pressure_obs`
+- `peak_inspiratory_pressure_obs`
+
+Used to:
+- Characterize respiratory support at ICU admission
+- Quantify escalation within 24 hours
+- Model ventilatory trajectory
+- Calculate duration of invasive mechanical ventilation
+
+---
+
+### 7. (Recommended) **labs**
+- `hospitalization_id`
+- `lab_result_dttm`
+- `lab_category`
+- `lab_value`
+
+Recommended categories include:
+- PaO2
+- Lactate
+- Creatinine
+- WBC
+
+Used to define postoperative pulmonary complications and physiologic severity.
+
+---
+
+## Cohort Identification
+
+### Inclusion Criteria
+
+A hospitalization is included if all of the following are met:
+
+1. Age ≥ 18 years at admission  
+2. Lung cancer diagnosis present on admission  
+   - ICD-9-CM or ICD-10-CM lung cancer codes  
+   - `poa_present == 1`  
+3. Lung resection procedure during hospitalization  
+4. ICU admission occurring after the procedure  
+   - `procedure_time < icu_in_time`  
+   - Closest ICU admission after resection selected  
+   - Optional restriction: ICU admission within 48 hours of surgery  
+5. Valid geographic identifier available for exposure linkage  
+
+### Index Time (t0)
+
+`t0 = ICU admission time following lung resection`
+
+All recovery and complication metrics are anchored to this time.
+
+---
+
+## Outcome Framework
+
+The primary construct is **Postoperative Respiratory Recovery Severity**, defined using:
+
+- Respiratory support category at ICU admission
+- Escalation to invasive mechanical ventilation within 24 hours
+- Duration of invasive ventilation
+- Development of acute respiratory failure
+- Reintubation
+- Postoperative pneumonia
+- ICU length of stay
+- In-hospital mortality
+
+These outcomes represent a continuum of postoperative respiratory vulnerability.
+
+---
+
+## Exposure Variables
+
+Preoperative long-term ambient exposure estimates:
+
+- Annual average PM₂.₅
+- Annual average NO₂
+
+Exposure is assigned using available geographic identifiers (census tract, ZIP, or county).
+
+---
 
 ## Expected Results
 
-*Describe the output of the analysis. The final project results should be saved in the [`output/final`](output/README.md) directory.*
+The project will produce:
 
-## Detailed Instructions for running the project
+1. A curated analytic cohort of post–lung cancer resection ICU admissions  
+2. Summary distributions of respiratory support at ICU entry  
+3. Ventilatory escalation and trajectory analyses  
+4. Incidence of postoperative pulmonary complications  
+5. Multivariable models estimating associations between air pollution exposure and:
+   - Ventilation duration  
+   - Escalation risk  
+   - PPC incidence  
+   - ICU length of stay  
+   - Mortality  
 
-## 1. Update `config/config.json`
-Follow instructions in the [config/README.md](config/README.md) file for detailed configuration steps.
+Final project results should be saved in the [`output/final`](output/README.md) directory.
 
-**Note: if using the `01_run_cohort_id_app.R` file, this step is not necessary as the app will create the config file for the user**
-
-## 2. Set up the project environment
-
-*Describe the steps to setup the project environment.*
-
-Example for R:
-Run `00_renv_restore.R` in the [code](code/templates/R) to set up the project environment
-
-Example for Python:
-
-**Preferred method using uv:**
-```
-uv init project-name
-cd project-name
-```
-Note: uv automatically creates virtual environments and manages dependencies. It generates required files like `uv.lock` for reproducible builds. For more details, see the [CLIF uv guide by Zewei Whiskey Liao](https://github.com/Common-Longitudinal-ICU-data-Format/CLIF-data-huddles/blob/main/notes/uv-and-conv-commits.md).
-
-**Alternative method using python3:**
-```
-python3 -m venv .mobilization
-source .mobilization/bin/activate
-pip install -r requirements.txt 
-```
-
-## 3. Run code
-
-Detailed instructions on the code workflow are provided in the [code directory](code/README.md)
-
-## Example Repositories
-* [CLIF Adult Sepsis Events](https://github.com/08wparker/CLIF_sepsis) for R
-* [CLIF Eligibility for mobilization](https://github.com/kaveriC/CLIF-eligibility-for-mobilization) for Python
-* [CLIF Variation in Ventilation](https://github.com/ingra107/clif_vent_variation)
 ---
 
+## Detailed Instructions for Running the Project
+
+### 1. Update `config/config.json`
+
+Follow instructions in the [config/README.md](config/README.md) file for detailed configuration steps.
+
+**Note: if using the `01_run_cohort_id_app.R` file, this step is not necessary as the app will create the config file for the user.**
+
+---
+
+### 2. Set Up the Project Environment
+
+#### R
+
+Run:
 
