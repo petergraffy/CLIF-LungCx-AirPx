@@ -1,4 +1,4 @@
-# CLIF Post–Lung Cancer Resection Respiratory Recovery Project
+# *CLIF Post–Lung Cancer Resection Respiratory Recovery Project (PLCR3)*
 
 ## CLIF VERSION 
 
