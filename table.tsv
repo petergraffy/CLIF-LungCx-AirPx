@@ -1,0 +1,45 @@
+Code	Code Type	Definition
+C34.00	ICD-10-CM	Malignant neoplasm of unspecified main bronchus
+C34.01	ICD-10-CM	Malignant neoplasm of right main bronchus
+C34.02	ICD-10-CM	Malignant neoplasm of left main bronchus
+C34.10	ICD-10-CM	Malignant neoplasm of unspecified upper lobe
+C34.11	ICD-10-CM	Malignant neoplasm of right upper lobe
+C34.12	ICD-10-CM	Malignant neoplasm of left upper lobe
+C34.20	ICD-10-CM	Malignant neoplasm of unspecified middle lobe
+C34.21	ICD-10-CM	Malignant neoplasm of right middle lobe
+C34.30	ICD-10-CM	Malignant neoplasm of unspecified lower lobe
+C34.31	ICD-10-CM	Malignant neoplasm of right lower lobe
+C34.32	ICD-10-CM	Malignant neoplasm of left lower lobe
+C34.80	ICD-10-CM	Malignant neoplasm of overlapping sites of lung
+C34.90	ICD-10-CM	Malignant neoplasm of unspecified lung
+C34.91	ICD-10-CM	Malignant neoplasm of right lung, unspecified
+C34.92	ICD-10-CM	Malignant neoplasm of left lung, unspecified
+Z85.118	ICD-10-CM	Personal history of malignant neoplasm of bronchus and lung
+C78.00–C78.02	ICD-10-CM	Secondary malignant neoplasm of lung (metastatic disease)
+0BTC0ZZ	ICD-10-PCS	Resection of right upper lung lobe, open approach
+0BTC4ZZ	ICD-10-PCS	Resection of right upper lung lobe, percutaneous endoscopic (VATS)
+0BTD0ZZ	ICD-10-PCS	Resection of right lower lung lobe, open approach
+0BTD4ZZ	ICD-10-PCS	Resection of right lower lung lobe, percutaneous endoscopic
+0BTG0ZZ	ICD-10-PCS	Resection of left upper lung lobe, open approach
+0BTG4ZZ	ICD-10-PCS	Resection of left upper lung lobe, percutaneous endoscopic
+0BTH0ZZ	ICD-10-PCS	Resection of left lower lung lobe, open approach
+0BTH4ZZ	ICD-10-PCS	Resection of left lower lung lobe, percutaneous endoscopic
+0BTJ0ZZ	ICD-10-PCS	Resection of right lung (pneumonectomy), open approach
+0BTJ4ZZ	ICD-10-PCS	Resection of right lung, percutaneous endoscopic
+0BTK0ZZ	ICD-10-PCS	Resection of left lung (pneumonectomy), open approach
+0BTK4ZZ	ICD-10-PCS	Resection of left lung, percutaneous endoscopic
+32480	CPT	Removal of lung; total lobectomy
+32482	CPT	Lobectomy with bronchoplasty
+32663	CPT	Thoracoscopy (VATS) with lobectomy
+32484	CPT	Removal of lung; segmentectomy
+32505	CPT	Wedge resection of lung
+32666	CPT	Thoracoscopy (VATS) with wedge resection
+32669	CPT	Thoracoscopy (VATS) with segmentectomy
+32440	CPT	Pneumonectomy
+32442	CPT	Pneumonectomy with bronchoplasty
+38746	CPT	Mediastinal lymphadenectomy
+32674	CPT	Thoracoscopy with mediastinal/regional lymphadenectomy
+J96.00	ICD-10-CM	Acute respiratory failure, unspecified
+J96.01	ICD-10-CM	Acute respiratory failure with hypoxia
+J80	ICD-10-CM	Acute respiratory distress syndrome (ARDS)
+5A1935Z	ICD-10-PCS	Respiratory ventilation >96 consecutive hours
