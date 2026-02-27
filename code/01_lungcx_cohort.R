@@ -163,7 +163,7 @@ base_no_ext <- tools::file_path_sans_ext(tolower(bn))
 base_norm <- ifelse(looks_clif, base_no_ext, paste0("clif_", base_no_ext))
 found_map <- stats::setNames(all_files, base_norm)
 
-required_raw <- c("patient","hospitalization","adt","hospital_diagnosis","respiratory_support")
+required_raw <- c("patient","hospitalization","adt","hospital_diagnosis","respiratory_support", "vitals", "labs")
 required_files <- paste0("clif_", required_raw)
 missing <- setdiff(required_files, names(found_map))
 if (length(missing) > 0) {
@@ -394,20 +394,62 @@ rs_cohort <- rs_raw %>%
   filter(in_icu)
 
 # Device intensity ranking (EDIT as needed for your site value set)
-device_rank <- function(x) {
+# Exact CLIF respiratory_support device_category mapping
+# Ordered from least to most support intensity
+clif_device_levels <- c(
+  "ROOM AIR",
+  "NASAL CANNULA",
+  "FACE MASK",
+  "TRACH COLLAR",
+  "HIGH FLOW NC",
+  "CPAP",
+  "NIPPV",
+  "IMV",
+  "OTHER"
+)
+
+device_rank_clif <- function(x) {
   x <- toupper(trimws(as.character(x)))
-  case_when(
-    x %in% c("ECMO") ~ 5,
-    x %in% c("IMV","INVASIVE","MECHANICALVENTILATION") ~ 4,
-    x %in% c("NIV","BIPAP","CPAP") ~ 3,
-    x %in% c("HFNC","HIGHFLOW") ~ 2,
-    x %in% c("NC","NASALCANNULA","O2","OXYGEN") ~ 1,
+  # handle minor variants defensively
+  x <- dplyr::case_when(
+    x %in% c("HIGHFLOW NC","HIGHFLOW NASAL CANNULA","HFNC") ~ "HIGH FLOW NC",
+    x %in% c("NIV","BIPAP") ~ "NIPPV",
+    TRUE ~ x
+  )
+  dplyr::case_when(
+    x == "ROOM AIR" ~ 0,
+    x == "NASAL CANNULA" ~ 1,
+    x == "FACE MASK" ~ 2,
+    x == "TRACH COLLAR" ~ 2,     # same tier as Face Mask (non-positive pressure O2 delivery)
+    x == "HIGH FLOW NC" ~ 3,
+    x == "CPAP" ~ 4,
+    x == "NIPPV" ~ 4,
+    x == "IMV" ~ 5,
+    x == "OTHER" ~ 2,            # conservative default; change if your "Other" tends to be higher acuity
     is.na(x) | x == "" ~ NA_real_,
-    TRUE ~ 0
+    TRUE ~ NA_real_
   )
 }
 
-rs_cohort <- rs_cohort %>% mutate(rank = device_rank(device_category))
+device_state_clif <- function(x) {
+  x <- toupper(trimws(as.character(x)))
+  x <- dplyr::case_when(
+    x %in% c("HIGHFLOW NC","HIGHFLOW NASAL CANNULA","HFNC") ~ "HIGH FLOW NC",
+    x %in% c("NIV","BIPAP") ~ "NIPPV",
+    TRUE ~ x
+  )
+  dplyr::case_when(
+    x %in% clif_device_levels ~ x,
+    is.na(x) | x == "" ~ "UNK",
+    TRUE ~ "UNK"
+  )
+}
+
+rs_cohort <- rs_cohort %>%
+  mutate(
+    device_cat_std = device_state_clif(device_category),
+    rank = device_rank_clif(device_category)
+  )
 
 # A) First device at/after t0 (within +6h window)
 first_device <- rs_cohort %>%
@@ -416,13 +458,13 @@ first_device <- rs_cohort %>%
   group_by(hospitalization_id) %>%
   slice(1) %>%
   ungroup() %>%
-  transmute(hospitalization_id, device_t0 = device_category)
+  transmute(hospitalization_id, device_t0 = device_cat_std)
 
-# B) IMV hours in ICU and first 72h (hour-binned)
+# B) IMV hours in ICU and first 72h (hour-binned, exact IMV label)
 imv_hours <- rs_cohort %>%
   mutate(
     dt_h_floor = floor(dt_h),
-    is_imv = toupper(device_category) %in% c("IMV","INVASIVE","MECHANICALVENTILATION")
+    is_imv = device_cat_std == "IMV"
   ) %>%
   filter(!is.na(dt_h_floor)) %>%
   group_by(hospitalization_id) %>%
