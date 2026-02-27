@@ -1,4 +1,4 @@
-# *CLIF Post–Lung Cancer Resection Respiratory Recovery Project (PLCR3)*
+# CLIF Lung Cancer ICU Epidemiology, Trajectories, and Outcomes
 
 ## CLIF VERSION 
 
@@ -8,7 +8,7 @@
 
 ## Objective
 
-To evaluate whether long-term ambient air pollution exposure (PM₂.₅ and NO₂) is associated with postoperative respiratory recovery severity among patients undergoing lung cancer resection who require ICU care.
+To evaluate whether long-term ambient air pollution exposure (PM₂.₅ and NO₂) is associated with respiratory recovery severity among patients undergoing lung cancer resection who require ICU care.
 
 This project integrates high-resolution CLIF ICU physiologic data with preoperative environmental exposure estimates to quantify:
 
