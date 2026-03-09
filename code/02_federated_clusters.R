@@ -53,6 +53,8 @@ suppressPackageStartupMessages({
   library(survival)
   library(comorbidity)
   library(ggplot2)
+  library(sf)
+  library(tigris)
 })
 
 # ---------------------------
@@ -1478,6 +1480,463 @@ export_manifest <- tibble(
   )
 )
 save_csv(export_manifest, "federated_export_manifest")
+
+
+# ================================================================================================
+# 17) Spatial distribution of trajectory clusters (county-level federated export)
+# ================================================================================================
+
+options(tigris_use_cache = TRUE)
+options(tigris_class = "sf")
+
+# ---------------------------
+# Parameters
+# ---------------------------
+MIN_CELL_N <- 11L   # suppress small cells for federated export if needed
+MAP_YEAR <- 2022L
+
+# ---------------------------
+# Build county-cluster table
+# ---------------------------
+county_cluster <- analysis_ready %>%
+  mutate(
+    county_code = gsub("[^0-9]", "", as.character(county_code)),
+    county_code = ifelse(nchar(county_code) == 4, paste0("0", county_code), county_code)
+  ) %>%
+  filter(!is.na(county_code), nchar(county_code) == 5, !is.na(traj_cluster_ra)) %>%
+  count(county_code, traj_cluster_ra, name = "n") %>%
+  group_by(county_code) %>%
+  mutate(
+    county_total = sum(n),
+    prop_cluster_in_county = n / county_total
+  ) %>%
+  ungroup() %>%
+  group_by(traj_cluster_ra) %>%
+  mutate(
+    cluster_total = sum(n),
+    prop_county_in_cluster = n / cluster_total
+  ) %>%
+  ungroup() %>%
+  mutate(
+    n_suppressed = ifelse(n < MIN_CELL_N, NA_integer_, n),
+    prop_cluster_in_county_suppressed = ifelse(n < MIN_CELL_N, NA_real_, prop_cluster_in_county),
+    prop_county_in_cluster_suppressed = ifelse(n < MIN_CELL_N, NA_real_, prop_county_in_cluster),
+    site_name = SITE_NAME
+  )
+
+save_csv(county_cluster, "spatial_county_cluster_distribution")
+
+# ---------------------------
+# County-level summary table
+# ---------------------------
+county_summary <- county_cluster %>%
+  group_by(county_code) %>%
+  summarize(
+    site_name = first(site_name),
+    county_total = first(county_total),
+    dominant_cluster = traj_cluster_ra[which.max(prop_cluster_in_county)],
+    dominant_cluster_prop = max(prop_cluster_in_county, na.rm = TRUE),
+    n_clusters_present = sum(n > 0, na.rm = TRUE),
+    cluster_entropy = {
+      p <- prop_cluster_in_county[prop_cluster_in_county > 0]
+      -sum(p * log(p))
+    },
+    .groups = "drop"
+  ) %>%
+  mutate(
+    county_total_suppressed = ifelse(county_total < MIN_CELL_N, NA_integer_, county_total),
+    dominant_cluster_prop_suppressed = ifelse(county_total < MIN_CELL_N, NA_real_, dominant_cluster_prop),
+    dominant_cluster_suppressed = ifelse(county_total < MIN_CELL_N, NA_character_, as.character(dominant_cluster)),
+    cluster_entropy_suppressed = ifelse(county_total < MIN_CELL_N, NA_real_, cluster_entropy)
+  )
+
+save_csv(county_summary, "spatial_county_cluster_summary")
+
+# ================================================================================================
+# Maps
+# ================================================================================================
+
+# ================================================================================================
+# Restrict counties to CONUS
+# ================================================================================================
+
+conus_states <- c(
+  "01","04","05","06","08","09","10","11","12","13",
+  "16","17","18","19","20","21","22","23","24","25",
+  "26","27","28","29","30","31","32","33","34","35",
+  "36","37","38","39","40","41","42","44","45","46",
+  "47","48","49","50","51","53","54","55","56"
+)
+
+us_counties <- tigris::counties(cb = TRUE, year = MAP_YEAR, class = "sf") %>%
+  st_transform(5070) %>%
+  mutate(
+    county_code = GEOID,
+    state_fips = substr(GEOID, 1, 2)
+  ) %>%
+  filter(state_fips %in% conus_states)
+
+# Join county summary
+county_map_df <- us_counties %>%
+  left_join(county_summary, by = "county_code")
+
+# ---------------------------
+# Map 1: dominant cluster by county
+# ---------------------------
+p_map_dominant <- ggplot(county_map_df) +
+  geom_sf(aes(fill = dominant_cluster_suppressed), color = NA) +
+  labs(
+    title = "Dominant respiratory trajectory cluster by county",
+    subtitle = paste0("Site: ", SITE_NAME),
+    fill = "Dominant cluster"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold")
+  )
+
+save_plot(p_map_dominant, "map_county_dominant_cluster", w = 12, h = 8)
+
+# ---------------------------
+# Map 2: dominant cluster concentration
+# ---------------------------
+p_map_concentration <- ggplot(county_map_df) +
+  geom_sf(aes(fill = dominant_cluster_prop_suppressed), color = NA) +
+  scale_fill_viridis_c(na.value = "grey90") +
+  labs(
+    title = "Dominant cluster concentration by county",
+    subtitle = paste0("Site: ", SITE_NAME),
+    fill = "Dominant cluster proportion"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold")
+  )
+
+save_plot(p_map_concentration, "map_county_dominant_cluster_prop", w = 12, h = 8)
+
+# ---------------------------
+# Map 3: cluster heterogeneity (entropy)
+# ---------------------------
+p_map_entropy <- ggplot(county_map_df) +
+  geom_sf(aes(fill = cluster_entropy_suppressed), color = NA) +
+  scale_fill_viridis_c(na.value = "grey90") +
+  labs(
+    title = "Trajectory cluster heterogeneity by county",
+    subtitle = paste0("Site: ", SITE_NAME),
+    fill = "Entropy"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold")
+  )
+
+save_plot(p_map_entropy, "map_county_cluster_entropy", w = 12, h = 8)
+
+# ================================================================================================
+# Optional: one map per cluster showing within-county prevalence
+# ================================================================================================
+
+cluster_map_long <- county_cluster %>%
+  transmute(
+    site_name,
+    county_code,
+    traj_cluster_ra,
+    county_total,
+    n = n_suppressed,
+    prop_cluster_in_county = prop_cluster_in_county_suppressed
+  ) %>%
+  left_join(us_counties %>% dplyr::select(county_code, geometry), by = "county_code") %>%
+  st_as_sf()
+
+p_map_cluster_facets <- ggplot(cluster_map_long) +
+  geom_sf(aes(fill = prop_cluster_in_county), color = NA) +
+  scale_fill_viridis_c(na.value = "grey90") +
+  facet_wrap(~ traj_cluster_ra) +
+  labs(
+    title = "Within-county prevalence of trajectory clusters",
+    subtitle = paste0("Site: ", SITE_NAME),
+    fill = "Cluster proportion"
+  ) +
+  theme_void() +
+  theme(
+    plot.title = element_text(face = "bold"),
+    legend.title = element_text(face = "bold")
+  )
+
+save_plot(p_map_cluster_facets, "map_county_cluster_prevalence_facets", w = 14, h = 10)
+
+# ================================================================================================
+# 18) CONSORT-style cohort flow table
+# ================================================================================================
+
+# Uses objects created in 01_lungcx_cohort.R:
+#   flow_lung
+#   exclusion_lung
+#   cohort_lung
+
+consort_flow_counts <- flow_lung %>%
+  transmute(
+    site_name = SITE_NAME,
+    step,
+    step_order = row_number(),
+    n_remaining = remaining,
+    n_excluded_at_step = excluded_at_step
+  )
+
+save_csv(consort_flow_counts, "consort_flow_counts")
+
+consort_exclusion_reasons <- exclusion_lung %>%
+  count(reason, name = "n") %>%
+  mutate(site_name = SITE_NAME) %>%
+  relocate(site_name)
+
+save_csv(consort_exclusion_reasons, "consort_exclusion_reasons")
+
+# ================================================================================================
+# 19) Table 1 exports (federated-friendly long format)
+# ================================================================================================
+
+# analysis_ready already contains from 01_lungcx_cohort.R:
+#   hospitalization_id
+#   admission_dttm, discharge_dttm
+#   death_in_hosp, hospice_discharge, death_or_hospice
+#   icu_los_hours
+#   age_years, sex_category, race_category, ethnicity_category
+#   census_tract, county_code
+#   device_t0
+#   imv_hours_icu, imv_hours_72h
+#   any_imv_icu, any_imv_72h
+#   escalations_icu, deescalations_icu
+#   pm25_1y, pm25_3y, pm25_5y
+#   no2_1y, no2_3y, no2_5y
+#
+# and from 02_federated_clusters.R gets augmented with:
+#   traj_cluster_ra
+#   vaso_any_72h, vaso_hours_72h, vaso_mean_72h
+#   charlson_score
+#   advanced_cancer_any_poa, metastatic_cancer_poa,
+#   malignant_pleural_effusion_poa, cachexia_poa
+#   sofa_total, sofa_resp, sofa_cv, sofa_renal, sofa_liver, sofa_coag, sofa_cns
+#   severity_rank
+
+table1_dat <- analysis_ready %>%
+  left_join(vaso_static, by = "hospitalization_id") %>%
+  mutate(
+    site_name = SITE_NAME,
+    
+    age_years = as.numeric(age_years),
+    icu_los_hours = as.numeric(icu_los_hours),
+    
+    imv_hours_icu = as.numeric(imv_hours_icu),
+    imv_hours_72h = as.numeric(imv_hours_72h),
+    escalations_icu = as.numeric(escalations_icu),
+    deescalations_icu = as.numeric(deescalations_icu),
+    
+    pm25_1y = as.numeric(pm25_1y),
+    pm25_3y = as.numeric(pm25_3y),
+    pm25_5y = as.numeric(pm25_5y),
+    no2_1y  = as.numeric(no2_1y),
+    no2_3y  = as.numeric(no2_3y),
+    no2_5y  = as.numeric(no2_5y),
+    
+    charlson_score = as.numeric(charlson_score),
+    sofa_total = as.numeric(sofa_total),
+    sofa_resp = as.numeric(sofa_resp),
+    sofa_cv = as.numeric(sofa_cv),
+    sofa_renal = as.numeric(sofa_renal),
+    sofa_liver = as.numeric(sofa_liver),
+    sofa_coag = as.numeric(sofa_coag),
+    sofa_cns = as.numeric(sofa_cns),
+    
+    death_in_hosp = as.integer(coalesce(death_in_hosp, FALSE)),
+    hospice_discharge = as.integer(coalesce(hospice_discharge, FALSE)),
+    death_or_hospice = as.integer(coalesce(death_or_hospice, FALSE)),
+    any_imv_icu = as.integer(coalesce(any_imv_icu, FALSE)),
+    any_imv_72h = as.integer(coalesce(any_imv_72h, FALSE)),
+    vaso_any_72h = as.integer(coalesce(vaso_any_72h, 0L)),
+    
+    advanced_cancer_any_poa = as.integer(coalesce(advanced_cancer_any_poa, FALSE)),
+    metastatic_cancer_poa = as.integer(coalesce(metastatic_cancer_poa, FALSE)),
+    malignant_pleural_effusion_poa = as.integer(coalesce(malignant_pleural_effusion_poa, FALSE)),
+    cachexia_poa = as.integer(coalesce(cachexia_poa, FALSE))
+  )
+
+# ---------------------------
+# Summary helpers
+# ---------------------------
+summ_cont <- function(data, var, by) {
+  v <- rlang::sym(var)
+  b <- rlang::sym(by)
+  
+  data %>%
+    group_by(!!b) %>%
+    summarize(
+      n_nonmissing = sum(!is.na(!!v)),
+      mean = mean(!!v, na.rm = TRUE),
+      sd = sd(!!v, na.rm = TRUE),
+      median = median(!!v, na.rm = TRUE),
+      p25 = quantile(!!v, 0.25, na.rm = TRUE),
+      p75 = quantile(!!v, 0.75, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      site_name = SITE_NAME,
+      variable = var,
+      level = NA_character_,
+      summary_type = "continuous"
+    ) %>%
+    rename(stratum = !!b) %>%
+    relocate(site_name, stratum, variable, level, summary_type)
+}
+
+summ_cat <- function(data, var, by) {
+  v <- rlang::sym(var)
+  b <- rlang::sym(by)
+  
+  data %>%
+    mutate(.level = as.character(!!v)) %>%
+    group_by(!!b, .level) %>%
+    summarize(n = n(), .groups = "drop_last") %>%
+    mutate(
+      denom = sum(n),
+      prop = n / denom
+    ) %>%
+    ungroup() %>%
+    mutate(
+      site_name = SITE_NAME,
+      variable = var,
+      level = .level,
+      summary_type = "categorical"
+    ) %>%
+    rename(stratum = !!b) %>%
+    dplyr::select(site_name, stratum, variable, level, summary_type, n, denom, prop)
+}
+
+summ_cont_overall <- function(data, var) {
+  v <- rlang::sym(var)
+  
+  data %>%
+    summarize(
+      n_nonmissing = sum(!is.na(!!v)),
+      mean = mean(!!v, na.rm = TRUE),
+      sd = sd(!!v, na.rm = TRUE),
+      median = median(!!v, na.rm = TRUE),
+      p25 = quantile(!!v, 0.25, na.rm = TRUE),
+      p75 = quantile(!!v, 0.75, na.rm = TRUE)
+    ) %>%
+    mutate(
+      site_name = SITE_NAME,
+      stratum = "Overall",
+      variable = var,
+      level = NA_character_,
+      summary_type = "continuous"
+    ) %>%
+    relocate(site_name, stratum, variable, level, summary_type)
+}
+
+summ_cat_overall <- function(data, var) {
+  v <- rlang::sym(var)
+  
+  data %>%
+    mutate(.level = as.character(!!v)) %>%
+    count(.level, name = "n") %>%
+    mutate(
+      denom = sum(n),
+      prop = n / denom,
+      site_name = SITE_NAME,
+      stratum = "Overall",
+      variable = var,
+      level = .level,
+      summary_type = "categorical"
+    ) %>%
+    dplyr::select(site_name, stratum, variable, level, summary_type, n, denom, prop)
+}
+
+# ---------------------------
+# Variables for Table 1
+# ---------------------------
+cont_vars <- c(
+  "age_years",
+  "icu_los_hours",
+  "imv_hours_icu",
+  "imv_hours_72h",
+  "escalations_icu",
+  "deescalations_icu",
+  "vaso_hours_72h",
+  "vaso_mean_72h",
+  "pm25_1y",
+  "pm25_3y",
+  "pm25_5y",
+  "no2_1y",
+  "no2_3y",
+  "no2_5y",
+  "charlson_score",
+  "sofa_total",
+  "sofa_resp",
+  "sofa_cv",
+  "sofa_renal",
+  "sofa_liver",
+  "sofa_coag",
+  "sofa_cns"
+)
+
+cat_vars <- c(
+  "sex_category",
+  "race_category",
+  "ethnicity_category",
+  "device_t0",
+  "traj_cluster_ra",
+  "severity_rank",
+  "death_in_hosp",
+  "hospice_discharge",
+  "death_or_hospice",
+  "any_imv_icu",
+  "any_imv_72h",
+  "vaso_any_72h",
+  "advanced_cancer_any_poa",
+  "metastatic_cancer_poa",
+  "malignant_pleural_effusion_poa",
+  "cachexia_poa"
+)
+
+# ---------------------------
+# Overall Table 1
+# ---------------------------
+table1_overall_cont <- purrr::map_dfr(cont_vars, ~ summ_cont_overall(table1_dat, .x))
+table1_overall_cat  <- purrr::map_dfr(cat_vars, ~ summ_cat_overall(table1_dat, .x))
+
+save_csv(table1_overall_cont, "table1_overall_continuous")
+save_csv(table1_overall_cat, "table1_overall_categorical")
+
+# ---------------------------
+# Table 1 by trajectory cluster
+# ---------------------------
+table1_by_cluster_cont <- purrr::map_dfr(cont_vars, ~ summ_cont(table1_dat, .x, by = "traj_cluster_ra"))
+table1_by_cluster_cat  <- purrr::map_dfr(cat_vars, ~ summ_cat(table1_dat, .x, by = "traj_cluster_ra"))
+
+save_csv(table1_by_cluster_cont, "table1_by_cluster_continuous")
+save_csv(table1_by_cluster_cat, "table1_by_cluster_categorical")
+
+# ---------------------------
+# Table 1 by NO2 quartile
+# ---------------------------
+table1_dat <- table1_dat %>%
+  mutate(
+    no2_quartile = ntile(no2_5y, 4),
+    no2_quartile = factor(no2_quartile, levels = 1:4, labels = c("Q1","Q2","Q3","Q4"))
+  )
+
+table1_by_no2_cont <- purrr::map_dfr(cont_vars, ~ summ_cont(table1_dat, .x, by = "no2_quartile"))
+table1_by_no2_cat  <- purrr::map_dfr(cat_vars, ~ summ_cat(table1_dat, .x, by = "no2_quartile"))
+
+save_csv(table1_by_no2_cont, "table1_by_no2_continuous")
+save_csv(table1_by_no2_cat, "table1_by_no2_categorical")
+
+
 
 cat("\nDone. All trajectory panels, clustering outputs, standardized model tables, and federated summaries were saved to:\n",
     out_dir, "\n", sep = "")
