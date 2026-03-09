@@ -1,109 +1,136 @@
-# CLIF Lung Cancer ICU Epidemiology, Trajectories, and Outcomes
+# CLIF ICU Respiratory Failure Trajectories, Air Pollution Exposure, and Outcomes
 
-## CLIF VERSION 
-
+## CLIF VERSION
 2.1
 
 ---
 
-## Objective
+# Objective
 
-To evaluate whether long-term ambient air pollution exposure (PM₂.₅ and NO₂) is associated with respiratory recovery severity among patients undergoing lung cancer resection who require ICU care.
+This project evaluates whether **long-term ambient air pollution exposure (PM₂.₅ and NO₂)** is associated with **early physiologic trajectories of acute respiratory failure (ARF)** and clinical outcomes among critically ill patients admitted to the ICU.
 
-This project integrates high-resolution CLIF ICU physiologic data with preoperative environmental exposure estimates to quantify:
+Using high-resolution physiologic data from the **Critical Care Informatics Framework (CLIF)**, the study reconstructs **hourly respiratory and physiologic trajectories during the first 72 hours of ICU care**. These trajectories are then grouped into phenotypic clusters representing distinct patterns of respiratory failure evolution.
 
-- Respiratory support at ICU admission
-- Early ventilatory trajectory and escalation within 24 hours
-- Duration of invasive mechanical ventilation
-- Development of postoperative pulmonary complications (PPCs)
-- ICU length of stay
-- In-hospital mortality
+The analysis evaluates whether chronic environmental exposure is associated with:
 
-We hypothesize that greater chronic pollution burden is associated with more severe postoperative respiratory recovery.
+- Distinct early respiratory failure trajectory phenotypes
+- Increased severity of respiratory failure
+- Greater risk of invasive mechanical ventilation
+- Higher ICU mortality
+- Longer ICU length of stay
+
+Because CLIF data are distributed across multiple institutions, this project is designed as a **federated analysis pipeline** in which each site executes the analysis locally and exports **PHI-safe cluster summaries and model results**.
 
 ---
 
-## Required CLIF Tables and Fields
+# Study Design Overview
 
-Please refer to the [CLIF data dictionary](https://clif-icu.com/data-dictionary), [CLIF Tools](https://clif-icu.com/tools), [ETL Guide](https://clif-icu.com/etl-guide), and [specific table contacts](https://github.com/clif-consortium/CLIF?tab=readme-ov-file#relational-clif) for more information on constructing the required tables and fields.
+The analytic workflow consists of four major stages:
 
-The following tables are required:
+### 1. ICU Cohort Construction
 
-### 1. **patient**
+Eligible ICU hospitalizations are identified using CLIF administrative tables.
+
+### 2. Hourly Physiologic Trajectory Reconstruction
+
+During the first **0–72 hours after ICU admission**, the following physiologic domains are reconstructed hourly:
+
+- Respiratory support state
+- Acute respiratory failure subtype
+- Vasopressor exposure
+
+### 3. Trajectory Phenotyping
+
+Sequence clustering is performed using **TraMineR optimal matching distances** to identify distinct respiratory trajectory phenotypes.
+
+### 4. Environmental Exposure Modeling
+
+Multivariable models evaluate whether long-term exposure to:
+
+- PM₂.₅
+- NO₂
+
+is associated with trajectory phenotype membership and clinical outcomes.
+
+---
+
+# Required CLIF Tables and Fields
+
+Please refer to the official resources for detailed table specifications:
+
+- [CLIF Data Dictionary](https://clif-icu.com/data-dictionary)  
+- [CLIF Tools](https://clif-icu.com/tools)  
+- [CLIF ETL Guide](https://clif-icu.com/etl-guide)
+
+The following CLIF tables are required.
+
+---
+
+# 1. `patient`
+
+Required fields:
+
 - `patient_id`
 - `birth_date`
 - `sex_category`
 - `race_category`
 - `ethnicity_category`
 
-Used to determine age and demographic covariates.
+Used to determine demographic characteristics and age.
 
 ---
 
-### 2. **hospitalization**
+# 2. `hospitalization`
+
+Required fields:
+
 - `patient_id`
 - `hospitalization_id`
 - `admission_dttm`
 - `discharge_dttm`
 - `age_at_admission`
+- `county_code`
 - `zipcode_five_digit`
 - `zipcode_nine_digit`
 - `census_tract`
-- `county_code`
 
 Used for:
-- Study period restriction
-- Age calculation
-- Geographic linkage for air pollution exposure assignment
+
+- cohort construction
+- geographic exposure assignment
+- outcome ascertainment
 
 ---
 
-### 3. **adt**
+# 3. `adt`
+
+Required fields:
+
 - `hospitalization_id`
 - `in_dttm`
 - `out_dttm`
 - `location_category`
 
 Used to:
-- Identify ICU admissions
-- Determine ICU admission occurring after lung resection
-- Define ICU length of stay
-- Anchor index time (t0)
+
+- identify ICU stays
+- determine ICU admission time
+- define the **index time (t0)** for trajectory reconstruction.
 
 ---
 
-### 4. **hospital_diagnosis**
-- `hospitalization_id`
-- `icd_code`
-- `poa_present`
-- `diagnosis_dttm`
+# 4. `respiratory_support`
 
-Used to:
-- Identify lung cancer diagnosis
-- Require present-on-admission flag (`poa_present == 1`)
-- Ensure cancer predates hospitalization
+Required fields:
 
----
-
-### 5. **patient_procedures**
-- `hospitalization_id`
-- `procedure_code`
-- `procedure_code_type`
-- `procedure_billed_dttm`
-- `procedure_dttm`
-
-Used to:
-- Identify lung cancer resection procedures (lobectomy, segmentectomy, pneumonectomy, wedge resection)
-- Establish temporal sequence (procedure must occur before ICU admission)
-
----
-
-### 6. **respiratory_support**
 - `hospitalization_id`
 - `recorded_dttm`
 - `device_category`
 - `mode_category`
 - `fio2_set`
+
+Optional fields:
+
 - `peep_set`
 - `resp_rate_set`
 - `tidal_volume_set`
@@ -111,114 +138,517 @@ Used to:
 - `peak_inspiratory_pressure_obs`
 
 Used to:
-- Characterize respiratory support at ICU admission
-- Quantify escalation within 24 hours
-- Model ventilatory trajectory
-- Calculate duration of invasive mechanical ventilation
+
+- determine respiratory support state
+- calculate FiO₂ exposure
+- define ventilatory trajectories
+
+Respiratory support states are collapsed into the following tiers:
+
+- ROOM AIR
+- LOW_O2
+- NIV
+- IMV
+- OTHER
 
 ---
 
-### 7. (Recommended) **labs**
+# 5. `vitals`
+
+Required fields:
+
+- `hospitalization_id`
+- `recorded_dttm`
+- `vital_category`
+- `vital_value`
+
+Used to extract:
+
+- SpO₂
+
+These measurements are paired with FiO₂ to detect **hypoxemic respiratory failure**.
+
+---
+
+# 6. `labs`
+
+Required fields:
+
 - `hospitalization_id`
 - `lab_result_dttm`
 - `lab_category`
-- `lab_value`
+- `lab_value_numeric`
 
-Recommended categories include:
-- PaO2
-- Lactate
-- Creatinine
-- WBC
+Used to extract:
 
-Used to define postoperative pulmonary complications and physiologic severity.
+- PaO₂
+- PaCO₂
+- arterial pH
 
----
-
-## Cohort Identification
-
-### Inclusion Criteria
-
-A hospitalization is included if all of the following are met:
-
-1. Age ≥ 18 years at admission  
-2. Lung cancer diagnosis present on admission  
-   - ICD-9-CM or ICD-10-CM lung cancer codes  
-   - `poa_present == 1`  
-3. Lung resection procedure during hospitalization  
-4. ICU admission occurring after the procedure  
-   - `procedure_time < icu_in_time`  
-   - Closest ICU admission after resection selected  
-   - Optional restriction: ICU admission within 48 hours of surgery  
-5. Valid geographic identifier available for exposure linkage  
-
-### Index Time (t0)
-
-`t0 = ICU admission time following lung resection`
-
-All recovery and complication metrics are anchored to this time.
+These measurements define physiologic respiratory failure subtypes.
 
 ---
 
-## Outcome Framework
+# 7. `medication_admin_continuous`
 
-The primary construct is **Postoperative Respiratory Recovery Severity**, defined using:
+Required fields:
 
-- Respiratory support category at ICU admission
-- Escalation to invasive mechanical ventilation within 24 hours
-- Duration of invasive ventilation
-- Development of acute respiratory failure
-- Reintubation
-- Postoperative pneumonia
+- `hospitalization_id`
+- `admin_dttm`
+- `med_group`
+- `mar_action_group`
+
+Used to detect **vasoactive medication administration**, which indicates circulatory failure.
+
+---
+
+# 8. `patient_assessments`
+
+Required fields:
+
+- `hospitalization_id`
+- `recorded_dttm`
+- `assessment_category`
+- `numerical_value`
+
+Used to extract:
+
+- Glasgow Coma Scale (GCS)
+
+These data contribute to **SOFA score calculation**.
+
+---
+
+# 9. `hospital_diagnosis`
+
+Required fields:
+
+- `hospitalization_id`
+- `diagnosis_code`
+- `diagnosis_code_format`
+- `poa_present`
+
+Used to derive:
+
+- Charlson comorbidity score
+- metastatic cancer indicators
+- neurologic comorbidity flags
+
+---
+
+# Cohort Identification
+
+Eligible hospitalizations must meet:
+
+1. Age ≥ 18 years  
+2. ICU admission recorded in the `adt` table  
+3. Available respiratory support data  
+4. Available geographic identifier for exposure assignment  
+
+Only the **first ICU admission per hospitalization** is used.
+
+---
+
+# Index Time (t0)
+
+- t0 = first ICU admission time
+
+
+All physiologic trajectories are anchored relative to this time.
+
+---
+
+# Trajectory Construction
+
+Hourly trajectories are constructed for **0–72 hours following ICU admission**.
+
+Each hour is assigned a composite physiologic state composed of:
+
+### Respiratory Support Tier
+
+Derived from `respiratory_support.device_category`.
+
+### Acute Respiratory Failure Subtype
+
+Defined using physiologic criteria.
+
+Hypoxemic ARF:
+
+- SpO₂ < 90% on room air  
+- PaO₂ ≤ 60 mmHg on room air  
+- PaO₂ / FiO₂ ≤ 300  
+
+Hypercapnic ARF:
+
+- PaCO₂ ≥ 45 mmHg **AND** pH < 7.35
+
+Combined states:
+
+- `ARF_HYPOX`
+- `ARF_HYPER`
+- `ARF_MIXED`
+- `NO_ARF`
+
+### Vasopressor Exposure
+
+Binary indicator of vasoactive medication administration.
+
+---
+
+# Sequence Clustering
+
+Hourly states are combined into patient-level sequences.
+
+Sequence clustering is performed using:
+
+- **Optimal Matching distance**
+- **Transition-rate substitution matrix**
+- **Ward hierarchical clustering**
+
+The optimal number of clusters is determined using:
+
+- silhouette width
+- cluster interpretability
+
+Clusters represent distinct **respiratory failure trajectory phenotypes**.
+
+---
+
+# Environmental Exposure Variables
+
+Long-term ambient exposure estimates are assigned using patient geography.
+
+Primary exposures:
+
+- **PM₂.₅** — long-term fine particulate matter exposure
+- **NO₂** — long-term nitrogen dioxide exposure
+
+Exposure values are standardized (z-scores) prior to modeling.
+
+---
+
+# Outcomes
+
+Primary outcome:
+
+- In-hospital mortality or hospice discharge
+
+Secondary outcomes:
+
 - ICU length of stay
-- In-hospital mortality
-
-These outcomes represent a continuum of postoperative respiratory vulnerability.
-
----
-
-## Exposure Variables
-
-Preoperative long-term ambient exposure estimates:
-
-- Annual average PM₂.₅
-- Annual average NO₂
-
-Exposure is assigned using available geographic identifiers (census tract, ZIP, or county).
+- Need for invasive mechanical ventilation
+- Timing of mechanical ventilation
+- Respiratory failure severity
 
 ---
 
-## Expected Results
+# Statistical Modeling
 
-The project will produce:
+Each site performs the following models locally.
 
-1. A curated analytic cohort of post–lung cancer resection ICU admissions  
-2. Summary distributions of respiratory support at ICU entry  
-3. Ventilatory escalation and trajectory analyses  
-4. Incidence of postoperative pulmonary complications  
-5. Multivariable models estimating associations between air pollution exposure and:
-   - Ventilation duration  
-   - Escalation risk  
-   - PPC incidence  
-   - ICU length of stay  
-   - Mortality  
-
-Final project results should be saved in the [`output/final`](output/README.md) directory.
+### Trajectory Phenotype Model
+ 
+Multinomial logistic regression: 
+All physiologic trajectories are anchored relative to this time.
 
 ---
 
-## Detailed Instructions for Running the Project
+# Trajectory Construction
 
-### 1. Update `config/config.json`
+Hourly trajectories are constructed for **0–72 hours following ICU admission**.
 
-Follow instructions in the [config/README.md](config/README.md) file for detailed configuration steps.
+Each hour is assigned a composite physiologic state composed of:
 
-**Note: if using the `01_run_cohort_id_app.R` file, this step is not necessary as the app will create the config file for the user.**
+### Respiratory Support Tier
+
+Derived from `respiratory_support.device_category`.
+
+### Acute Respiratory Failure Subtype
+
+Defined using physiologic criteria.
+
+Hypoxemic ARF:
+
+- SpO₂ < 90% on room air  
+- PaO₂ ≤ 60 mmHg on room air  
+- PaO₂ / FiO₂ ≤ 300  
+
+Hypercapnic ARF:
+
+- PaCO₂ ≥ 45 mmHg **AND** pH < 7.35
+
+Combined states:
+
+- `ARF_HYPOX`
+- `ARF_HYPER`
+- `ARF_MIXED`
+- `NO_ARF`
+
+### Vasopressor Exposure
+
+Binary indicator of vasoactive medication administration.
 
 ---
 
-### 2. Set Up the Project Environment
+# Sequence Clustering
 
-#### R
+Hourly states are combined into patient-level sequences.
 
-Run:
+Sequence clustering is performed using:
+
+- **Optimal Matching distance**
+- **Transition-rate substitution matrix**
+- **Ward hierarchical clustering**
+
+The optimal number of clusters is determined using:
+
+- silhouette width
+- cluster interpretability
+
+Clusters represent distinct **respiratory failure trajectory phenotypes**.
+
+---
+
+# Environmental Exposure Variables
+
+Long-term ambient exposure estimates are assigned using patient geography.
+
+Primary exposures:
+
+- **PM₂.₅** — long-term fine particulate matter exposure
+- **NO₂** — long-term nitrogen dioxide exposure
+
+Exposure values are standardized (z-scores) prior to modeling.
+
+---
+
+# Outcomes
+
+Primary outcome:
+
+- In-hospital mortality or hospice discharge
+
+Secondary outcomes:
+
+- ICU length of stay
+- Need for invasive mechanical ventilation
+- Timing of mechanical ventilation
+- Respiratory failure severity
+
+---
+
+# Statistical Modeling
+
+Each site performs the following models locally.
+
+### Trajectory Phenotype Model
+
+Multinomial logistic regression:
+
+All physiologic trajectories are anchored relative to this time.
+
+---
+
+# Trajectory Construction
+
+Hourly trajectories are constructed for **0–72 hours following ICU admission**.
+
+Each hour is assigned a composite physiologic state composed of:
+
+### Respiratory Support Tier
+
+Derived from `respiratory_support.device_category`.
+
+### Acute Respiratory Failure Subtype
+
+Defined using physiologic criteria.
+
+Hypoxemic ARF:
+
+- SpO₂ < 90% on room air  
+- PaO₂ ≤ 60 mmHg on room air  
+- PaO₂ / FiO₂ ≤ 300  
+
+Hypercapnic ARF:
+
+- PaCO₂ ≥ 45 mmHg **AND** pH < 7.35
+
+Combined states:
+
+- `ARF_HYPOX`
+- `ARF_HYPER`
+- `ARF_MIXED`
+- `NO_ARF`
+
+### Vasopressor Exposure
+
+Binary indicator of vasoactive medication administration.
+
+---
+
+# Sequence Clustering
+
+Hourly states are combined into patient-level sequences.
+
+Sequence clustering is performed using:
+
+- **Optimal Matching distance**
+- **Transition-rate substitution matrix**
+- **Ward hierarchical clustering**
+
+The optimal number of clusters is determined using:
+
+- silhouette width
+- cluster interpretability
+
+Clusters represent distinct **respiratory failure trajectory phenotypes**.
+
+---
+
+# Environmental Exposure Variables
+
+Long-term ambient exposure estimates are assigned using patient geography.
+
+Primary exposures:
+
+- **PM₂.₅** — long-term fine particulate matter exposure
+- **NO₂** — long-term nitrogen dioxide exposure
+
+Exposure values are standardized (z-scores) prior to modeling.
+
+---
+
+# Outcomes
+
+Primary outcome:
+
+- In-hospital mortality or hospice discharge
+
+Secondary outcomes:
+
+- ICU length of stay
+- Need for invasive mechanical ventilation
+- Timing of mechanical ventilation
+- Respiratory failure severity
+
+---
+
+# Statistical Modeling
+
+Each site performs the following models locally.
+
+### Trajectory Phenotype Model
+
+Multinomial logistic regression: trajectory_cluster ~ PM2.5 + NO2 + age + sex + race
+
+---
+
+### Mortality Model
+
+Logistic regression: death_or_hospice ~ PM2.5 + NO2 + trajectory_cluster + covariates
+
+---
+
+### Interaction Models
+
+death_or_hospice ~ NO2 * trajectory_cluster
+
+
+These models test whether pollution exposure modifies mortality risk differently across trajectory phenotypes.
+
+---
+
+### Landmark Survival Model
+
+A **72-hour landmark survival analysis** evaluates mortality risk beyond the initial trajectory window.
+
+---
+
+# Federated Analysis Framework
+
+Because patient-level data cannot be shared across sites, the project uses a **federated analysis approach**.
+
+Each site executes the full pipeline locally and exports only:
+
+- cluster summaries
+- trajectory signatures
+- regression coefficients
+- model diagnostics
+
+No patient-level data are shared.
+
+Central analysis then performs:
+
+- cross-site cluster harmonization
+- pooled meta-analysis of exposure associations
+
+---
+
+# Project Outputs
+
+Each site produces PHI-safe outputs including:
+
+### Trajectory Outputs
+
+- trajectory cluster assignments
+- representative sequence plots
+- cluster signature plots
+
+### Cluster Phenotype Summaries
+
+- cluster severity
+- SOFA scores
+- comorbidity burden
+- vasopressor exposure
+
+### Exposure Association Results
+
+- trajectory association models
+- mortality models
+- interaction models
+
+### Figures
+
+- trajectory signatures
+- predicted mortality by exposure
+- cluster severity profiles
+
+Final outputs are saved in: output/final
+
+---
+
+# Running the Project
+
+## 1 Update Configuration
+
+Edit: config/config.json
+
+Follow instructions in: config/README.md
+
+---
+
+## 2 Run the Cohort Identification App
+
+Run: 01_luncx_cohort.R
+
+This interactive tool generates the configuration file and verifies table availability.
+
+---
+
+## 3 Execute the Analysis Pipeline
+
+Run the full analysis pipeline: 02_federated_clusters.R
+
+This script performs:
+
+- trajectory construction
+- sequence clustering
+- exposure modeling
+- figure generation
+- federated export creation
+
+
+
+
+
 
