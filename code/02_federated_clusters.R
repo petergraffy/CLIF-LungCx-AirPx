@@ -1,5 +1,5 @@
 # ================================================================================================
-# CLIF | Lung Cancer ICU Trajectory Phenotypes + Air Pollution Association (Federated-Ready)
+# CLIF | Lung Cancer ICU Trajectory Phenotypes x Air Pollution Association
 #
 # PURPOSE
 #   This script:
@@ -1481,3 +1481,4 @@ save_csv(export_manifest, "federated_export_manifest")
 
 cat("\nDone. All trajectory panels, clustering outputs, standardized model tables, and federated summaries were saved to:\n",
     out_dir, "\n", sep = "")
+cat("\nPlease upload the output folder to Box.\n")

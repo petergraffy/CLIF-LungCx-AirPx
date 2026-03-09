@@ -195,7 +195,7 @@ get_min <- function(tbl_name, cols) {
   nm <- paste0("clif_", tbl_name)
   out <- clif_tables[[nm]] %>% rename_with(tolower)
   cols_keep <- intersect(tolower(cols), names(out))
-  out %>% select(any_of(cols_keep))
+  out %>% dplyr::select(any_of(cols_keep))
 }
 
 # --------------------------- Load dx prefixes ---------------------------
@@ -234,7 +234,7 @@ hospitalization <- get_min("hospitalization", c(
     hospice_discharge = str_detect(discharge_l, "hospice"),
     death_or_hospice = death_in_hosp | hospice_discharge
   ) %>%
-  select(-discharge_l)
+  dplyr::select(-discharge_l)
 
 adt <- get_min("adt", c("hospitalization_id","in_dttm","out_dttm","location_category","location_type")) %>%
   mutate(
@@ -264,7 +264,7 @@ base <- hospitalization %>%
   filter(!is.na(admission_dttm),
          admission_dttm >= START_DATE,
          admission_dttm <= END_DATE) %>%
-  left_join(patient %>% select(patient_id, birth_date, sex_category, race_category, ethnicity_category),
+  left_join(patient %>% dplyr::select(patient_id, birth_date, sex_category, race_category, ethnicity_category),
             by = "patient_id") %>%
   mutate(
     age_years = coalesce(
@@ -370,7 +370,7 @@ exclusion_lung <- base %>%
     )
   ) %>%
   filter(!(hospitalization_id %in% cohort_lung$hospitalization_id)) %>%
-  select(patient_id, hospitalization_id, reason)
+  dplyr::select(patient_id, hospitalization_id, reason)
 
 cat("\nCohort selection summary:\n")
 cat("  Base hospitalizations:         ", nrow(step0), "\n", sep="")
@@ -566,7 +566,7 @@ expo_roll <- expo %>%
     no2_5y  = trailing_mean_full(no2, 5)
   ) %>%
   ungroup() %>%
-  select(county, year, pm25_1y, pm25_3y, pm25_5y, no2_1y, no2_3y, no2_5y)
+  dplyr::select(county, year, pm25_1y, pm25_3y, pm25_5y, no2_1y, no2_3y, no2_5y)
 
 # Join to cohort (and keep only the new exposure columns if you want)
 cohort_expo <- cohort_lung %>%
@@ -575,7 +575,7 @@ cohort_expo <- cohort_lung %>%
     year   = as.integer(lubridate::year(as.Date(admission_dttm)))
   ) %>%
   left_join(expo_roll, by = c("county","year")) %>%
-  select(-county, -year)
+  dplyr::select(-county, -year)
 
 # QC
 cohort_expo %>%
@@ -593,7 +593,7 @@ cohort_expo %>%
 
 # --------------------------- Final analysis-ready bundle (federated friendly) ---------------------------
 analysis_ready <- cohort_lung %>%
-  select(
+  dplyr::select(
     hospitalization_id,
     admission_dttm, discharge_dttm,
     death_in_hosp, hospice_discharge, death_or_hospice,
@@ -601,10 +601,10 @@ analysis_ready <- cohort_lung %>%
     age_years, sex_category, race_category, ethnicity_category,
     census_tract, county_code
   ) %>%
-  left_join(rs_features %>% select(-t0), by = "hospitalization_id") %>%
+  left_join(rs_features %>% dplyr::select(-t0), by = "hospitalization_id") %>%
   left_join(
     cohort_expo %>%
-      select(hospitalization_id, pm25_1y, pm25_3y, pm25_5y, no2_1y, no2_3y, no2_5y),
+      dplyr::select(hospitalization_id, pm25_1y, pm25_3y, pm25_5y, no2_1y, no2_3y, no2_5y),
     by = "hospitalization_id"
   )
 
