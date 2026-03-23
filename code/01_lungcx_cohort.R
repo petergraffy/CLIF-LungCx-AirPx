@@ -222,6 +222,13 @@ patient <- get_min("patient", c("patient_id","birth_date","sex_category","race_c
   )
 
 
+# Last vital timestamp per hospitalization (fallback for death time)
+vitals_last <- clif_tables[["clif_vitals"]] %>%
+  mutate(recorded_dttm = safe_ts(recorded_dttm)) %>%
+  filter(!is.na(recorded_dttm)) %>%
+  group_by(hospitalization_id) %>%
+  summarize(last_vital_dttm = max(recorded_dttm, na.rm = TRUE), .groups = "drop")
+
 hospitalization <- get_min("hospitalization", c(
   "patient_id","hospitalization_id","admission_dttm","discharge_dttm","discharge_category",
   "age_at_admission","zipcode_nine_digit","zipcode_five_digit","census_tract","county_code"
@@ -275,13 +282,6 @@ rs_raw <- clif_tables[["clif_respiratory_support"]] %>%
     recorded_dttm = safe_ts(recorded_dttm),
     device_category = as.character(device_category)
   )
-
-# --------------------------- Mortality: last vital fallback ---------------------------
-vitals_last <- clif_tables[["clif_vitals"]] %>%
-  mutate(recorded_dttm = safe_ts(recorded_dttm)) %>%
-  filter(!is.na(recorded_dttm)) %>%
-  group_by(hospitalization_id) %>%
-  summarize(last_vital_dttm = max(recorded_dttm, na.rm = TRUE), .groups = "drop")
 
 # --------------------------- Cohort Build ---------------------------
 # A) Base hospitalizations in window + adults + geo

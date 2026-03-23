@@ -24,6 +24,9 @@ CLIF_*.fst
 #ignore the identifier app
 CLIF_cohort_identifier*
 
+# Output and logs (may contain PHI-adjacent data)
+/output/run_*/
+
 # ignore pdf reports and rendered html
 *.pdf
 *.html

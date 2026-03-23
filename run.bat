@@ -51,23 +51,14 @@ if errorlevel 1 (
 )
 call :log "--- Step 0: Complete ---"
 
-REM Step 1: Cohort identification + exposome linkage
-call :log "--- Step 1: Cohort identification (01_lungcx_cohort.R) ---"
-Rscript code\01_lungcx_cohort.R >> "%LOG_FILE%" 2>&1
-if errorlevel 1 (
-    call :log "ERROR: Step 1 failed. Check log for details."
-    exit /b 1
-)
-call :log "--- Step 1: Complete ---"
-
-REM Step 2: Trajectory clustering + association models
-call :log "--- Step 2: Federated clusters (02_federated_clusters.R) ---"
+REM Run full pipeline (02 sources 01 internally so all objects stay in one R process)
+call :log "--- Running full pipeline (01 -> 02) ---"
 Rscript code\02_federated_clusters.R >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
-    call :log "ERROR: Step 2 failed. Check log for details."
+    call :log "ERROR: Pipeline failed. Check log for details."
     exit /b 1
 )
-call :log "--- Step 2: Complete ---"
+call :log "--- Pipeline complete ---"
 
 call :log "=== Pipeline finished successfully ==="
 call :log "Review log: %LOG_FILE%"

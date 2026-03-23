@@ -42,6 +42,11 @@
 #   - All output file names are standardized for site-level federated export
 # ================================================================================================
 
+# Source 01 to build cohort (needed when running via Rscript in a fresh process)
+if (!exists("cohort_lung")) {
+  source("code/01_lungcx_cohort.R")
+}
+
 suppressPackageStartupMessages({
   library(tidyverse)
   library(lubridate)
