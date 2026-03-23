@@ -583,6 +583,7 @@ dev.off()
 
 analysis_ready <- analysis_ready %>%
   mutate(hospitalization_id = as.character(hospitalization_id)) %>%
+  dplyr::select(-any_of("traj_cluster_ra")) %>%
   left_join(traj_assign_ra, by = "hospitalization_id")
 
 # z-score exposures once
@@ -750,7 +751,7 @@ scores_df <- clif_tables[["clif_patient_assessments"]] %>%
   filter(!is.na(recorded_dttm), assessment_category == "gcs_total") %>%
   dplyr::select(hospitalization_id, recorded_dttm, assessment_category, numerical_value)
 
-safe_ts <- function(x) safe_posix(x)
+# safe_ts already defined in 01_lungcx_cohort.R
 
 sofa_scores <- calculate_sofa(
   cohort_data = sofa_cohort,
