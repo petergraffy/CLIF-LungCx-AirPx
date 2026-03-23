@@ -215,8 +215,11 @@ lung_dx_prefixes <- codes %>%
 save_csv(tibble(lung_dx_prefix=lung_dx_prefixes), "qc_lung_dx_prefixes")
 
 # --------------------------- Minimal tables ---------------------------
-patient <- get_min("patient", c("patient_id","birth_date","sex_category","race_category","ethnicity_category")) %>%
-  mutate(birth_date = safe_date(birth_date))
+patient <- get_min("patient", c("patient_id","birth_date","sex_category","race_category","ethnicity_category","death_dttm")) %>%
+  mutate(
+    birth_date = safe_date(birth_date),
+    death_dttm = safe_ts(death_dttm)
+  )
 
 
 hospitalization <- get_min("hospitalization", c(
@@ -234,7 +237,23 @@ hospitalization <- get_min("hospitalization", c(
     hospice_discharge = str_detect(discharge_l, "hospice"),
     death_or_hospice = death_in_hosp | hospice_discharge
   ) %>%
-  dplyr::select(-discharge_l)
+  dplyr::select(-discharge_l) %>%
+  left_join(patient %>% dplyr::select(patient_id, death_dttm), by = "patient_id") %>%
+  left_join(vitals_last, by = "hospitalization_id") %>%
+  mutate(
+    death_dttm_final = case_when(
+      death_or_hospice & is.na(death_dttm) ~ last_vital_dttm,
+      TRUE ~ death_dttm
+    ),
+    death_source = case_when(
+      !is.na(death_dttm) ~ "patient_death_dttm",
+      death_or_hospice & !is.na(last_vital_dttm) ~ "discharge_fallback_last_vital",
+      death_or_hospice &  is.na(last_vital_dttm) ~ "discharge_fallback_missing_last_vital",
+      TRUE ~ "no_death"
+    ),
+    death_ts = safe_ts(death_dttm_final)
+  ) %>%
+  dplyr::select(-death_dttm, -last_vital_dttm, -death_dttm_final)
 
 adt <- get_min("adt", c("hospitalization_id","in_dttm","out_dttm","location_category","location_type")) %>%
   mutate(
@@ -256,6 +275,13 @@ rs_raw <- clif_tables[["clif_respiratory_support"]] %>%
     recorded_dttm = safe_ts(recorded_dttm),
     device_category = as.character(device_category)
   )
+
+# --------------------------- Mortality: last vital fallback ---------------------------
+vitals_last <- clif_tables[["clif_vitals"]] %>%
+  mutate(recorded_dttm = safe_ts(recorded_dttm)) %>%
+  filter(!is.na(recorded_dttm)) %>%
+  group_by(hospitalization_id) %>%
+  summarize(last_vital_dttm = max(recorded_dttm, na.rm = TRUE), .groups = "drop")
 
 # --------------------------- Cohort Build ---------------------------
 # A) Base hospitalizations in window + adults + geo
@@ -328,6 +354,7 @@ cohort_lung <- step5 %>%
     patient_id, hospitalization_id,
     admission_dttm, discharge_dttm,
     discharge_category, death_in_hosp, hospice_discharge, death_or_hospice,
+    death_ts, death_source,
     first_icu_in, last_icu_out, icu_los_hours,
     age_years, sex_category, race_category, ethnicity_category,
     census_tract, county_code, zipcode_five_digit, zipcode_nine_digit,
@@ -596,6 +623,7 @@ analysis_ready <- cohort_lung %>%
     hospitalization_id,
     admission_dttm, discharge_dttm,
     death_in_hosp, hospice_discharge, death_or_hospice,
+    death_ts, death_source,
     icu_los_hours,
     age_years, sex_category, race_category, ethnicity_category,
     census_tract, county_code
