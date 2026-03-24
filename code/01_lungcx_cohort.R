@@ -26,6 +26,7 @@ suppressPackageStartupMessages({
   library(scales)
   library(data.table)
   library(dplyr)
+  library(janitor)
 })
 
 # --------------------------- Config ---------------------------
@@ -66,11 +67,19 @@ stopifnot(file.exists(PM25_PATH), file.exists(NO2_PATH))
 # --------------------------- Helpers ---------------------------
 `%||%` <- function(a, b) if (!is.null(a) && length(a) > 0 && !all(is.na(a))) a else b
 
-safe_posix <- function(x) {
-  if (inherits(x, "POSIXct")) return(x)
-  if (is.numeric(x)) return(as.POSIXct(x, origin = "1970-01-01", tz = "UTC"))
-  suppressWarnings(as.POSIXct(x, tz = "UTC"))
+safe_ts <- function(x, tz = "UTC") {
+  if (inherits(x, "POSIXt")) return(as.POSIXct(x, tz = tz))
+  if (is.numeric(x)) {
+    x2 <- ifelse(x > 1e12, x/1000, x)  # ms vs sec
+    return(as.POSIXct(x2, origin = "1970-01-01", tz = tz))
+  }
+  suppressWarnings(lubridate::parse_date_time(
+    x,
+    orders = c("ymd_HMS","ymd_HM","ymd","ymdTz","ymdT","mdy_HMS","mdy_HM","mdy","dmy_HMS","dmy_HM","dmy","HMS"),
+    tz = tz, quiet = TRUE
+  ))
 }
+safe_posix <- safe_ts  # alias for downstream compatibility
 safe_date <- function(x) {
   if (inherits(x, "Date")) return(x)
   suppressWarnings(as.Date(x))
@@ -144,56 +153,47 @@ analysis_meta <- tibble(
 )
 save_csv(analysis_meta, "meta_run_parameters")
 
-# --------------------------- Load CLIF tables ---------------------------
-exts <- strsplit(file_type, "[/|,; ]+")[[1]]
-exts <- exts[nzchar(exts)]
-if (length(exts) == 0) exts <- c("csv","parquet","fst")
-ext_pat <- paste0("\\.(", paste(unique(exts), collapse = "|"), ")$")
-
-all_files <- list.files(
-  path = tables_path,
-  pattern = ext_pat,
-  full.names = TRUE,
-  recursive = TRUE,
-  ignore.case = TRUE
-)
-if (length(all_files) == 0) stop("No CLIF files found under: ", tables_path)
-
-bn <- basename(all_files)
-looks_clif <- grepl("^clif_.*", bn, ignore.case = TRUE)
-base_no_ext <- tools::file_path_sans_ext(tolower(bn))
-base_norm <- ifelse(looks_clif, base_no_ext, paste0("clif_", base_no_ext))
-found_map <- stats::setNames(all_files, base_norm)
-
-required_raw <- c(
-  "patient","hospitalization","adt",
-  "hospital_diagnosis","respiratory_support", "labs",
-  "vitals","medication_admin_continuous", "patient_assessments"
-)
-required_files <- paste0("clif_", required_raw)
-missing <- setdiff(required_files, names(found_map))
-if (length(missing) > 0) {
-  cat("Detected CLIF-like files:\n"); print(sort(unique(names(found_map))))
-  stop("Missing required tables: ", paste(missing, collapse = ", "))
-}
-
+# --------------------------- I/O helpers ---------------------------
 read_any <- function(path) {
   ext <- tolower(tools::file_ext(path))
   switch(ext,
          "csv"     = readr::read_csv(path, show_col_types = FALSE),
          "parquet" = arrow::read_parquet(path),
          "fst"     = fst::read_fst(path, as.data.table = FALSE),
-         stop("Unsupported extension: ", ext, " for ", path))
+         stop("Unsupported extension: ", ext, " for path: ", path))
 }
 
-clif_paths  <- found_map[required_files]
-clif_tables <- lapply(clif_paths, read_any)
-names(clif_tables) <- required_files
+get_tbl_from_dir <- function(tbl_base) {
+  wanted <- tolower(tbl_base)
+  if (!startsWith(wanted, "clif_")) wanted <- paste0("clif_", wanted)
+
+  files <- list.files(tables_path, full.names = TRUE, recursive = TRUE)
+  files <- files[grepl("\\.(csv|parquet|fst)$", files, ignore.case = TRUE)]
+
+  bn <- tolower(tools::file_path_sans_ext(basename(files)))
+  bn_norm <- ifelse(startsWith(bn, "clif_"), bn, paste0("clif_", bn))
+
+  hit <- files[bn_norm == wanted]
+  if (length(hit) != 1) {
+    stop(glue("Could not uniquely locate {wanted} in {tables_path}. Matches: {length(hit)}"))
+  }
+  janitor::clean_names(read_any(hit))
+}
+
+# --------------------------- Load CLIF tables ---------------------------
+required_tables <- c(
+  "patient","hospitalization","adt",
+  "hospital_diagnosis","respiratory_support", "labs",
+  "vitals","medication_admin_continuous", "patient_assessments"
+)
+
+clif_tables <- lapply(stats::setNames(required_tables, paste0("clif_", required_tables)),
+                      function(tbl) get_tbl_from_dir(tbl))
 cat("Loaded tables: ", paste(names(clif_tables), collapse = ", "), "\n")
 
 get_min <- function(tbl_name, cols) {
   nm <- paste0("clif_", tbl_name)
-  out <- clif_tables[[nm]] %>% rename_with(tolower)
+  out <- clif_tables[[nm]]
   cols_keep <- intersect(tolower(cols), names(out))
   out %>% dplyr::select(any_of(cols_keep))
 }
@@ -215,9 +215,19 @@ lung_dx_prefixes <- codes %>%
 save_csv(tibble(lung_dx_prefix=lung_dx_prefixes), "qc_lung_dx_prefixes")
 
 # --------------------------- Minimal tables ---------------------------
-patient <- get_min("patient", c("patient_id","birth_date","sex_category","race_category","ethnicity_category")) %>%
-  mutate(birth_date = safe_date(birth_date))
+patient <- get_min("patient", c("patient_id","birth_date","sex_category","race_category","ethnicity_category","death_dttm")) %>%
+  mutate(
+    birth_date = safe_date(birth_date),
+    death_dttm = safe_ts(death_dttm)
+  )
 
+
+# Last vital timestamp per hospitalization (fallback for death time)
+vitals_last <- clif_tables[["clif_vitals"]] %>%
+  mutate(recorded_dttm = safe_ts(recorded_dttm)) %>%
+  filter(!is.na(recorded_dttm)) %>%
+  group_by(hospitalization_id) %>%
+  summarize(last_vital_dttm = max(recorded_dttm, na.rm = TRUE), .groups = "drop")
 
 hospitalization <- get_min("hospitalization", c(
   "patient_id","hospitalization_id","admission_dttm","discharge_dttm","discharge_category",
@@ -234,7 +244,23 @@ hospitalization <- get_min("hospitalization", c(
     hospice_discharge = str_detect(discharge_l, "hospice"),
     death_or_hospice = death_in_hosp | hospice_discharge
   ) %>%
-  dplyr::select(-discharge_l)
+  dplyr::select(-discharge_l) %>%
+  left_join(patient %>% dplyr::select(patient_id, death_dttm), by = "patient_id") %>%
+  left_join(vitals_last, by = "hospitalization_id") %>%
+  mutate(
+    death_dttm_final = case_when(
+      death_or_hospice & is.na(death_dttm) ~ last_vital_dttm,
+      TRUE ~ death_dttm
+    ),
+    death_source = case_when(
+      !is.na(death_dttm) ~ "patient_death_dttm",
+      death_or_hospice & !is.na(last_vital_dttm) ~ "discharge_fallback_last_vital",
+      death_or_hospice &  is.na(last_vital_dttm) ~ "discharge_fallback_missing_last_vital",
+      TRUE ~ "no_death"
+    ),
+    death_ts = safe_ts(death_dttm_final)
+  ) %>%
+  dplyr::select(-death_dttm, -last_vital_dttm, -death_dttm_final)
 
 adt <- get_min("adt", c("hospitalization_id","in_dttm","out_dttm","location_category","location_type")) %>%
   mutate(
@@ -252,9 +278,8 @@ hospital_dx <- get_min("hospital_diagnosis", c(
   )
 
 rs_raw <- clif_tables[["clif_respiratory_support"]] %>%
-  rename_with(tolower) %>%
   mutate(
-    recorded_dttm = safe_posix(recorded_dttm),
+    recorded_dttm = safe_ts(recorded_dttm),
     device_category = as.character(device_category)
   )
 
@@ -329,6 +354,7 @@ cohort_lung <- step5 %>%
     patient_id, hospitalization_id,
     admission_dttm, discharge_dttm,
     discharge_category, death_in_hosp, hospice_discharge, death_or_hospice,
+    death_ts, death_source,
     first_icu_in, last_icu_out, icu_los_hours,
     age_years, sex_category, race_category, ethnicity_category,
     census_tract, county_code, zipcode_five_digit, zipcode_nine_digit,
@@ -597,6 +623,7 @@ analysis_ready <- cohort_lung %>%
     hospitalization_id,
     admission_dttm, discharge_dttm,
     death_in_hosp, hospice_discharge, death_or_hospice,
+    death_ts, death_source,
     icu_los_hours,
     age_years, sex_category, race_category, ethnicity_category,
     census_tract, county_code

@@ -42,6 +42,11 @@
 #   - All output file names are standardized for site-level federated export
 # ================================================================================================
 
+# Source 01 to build cohort (needed when running via Rscript in a fresh process)
+if (!exists("cohort_lung")) {
+  source("code/01_lungcx_cohort.R")
+}
+
 suppressPackageStartupMessages({
   library(tidyverse)
   library(lubridate)
@@ -557,7 +562,6 @@ traj_assign_ra <- tibble(
   traj_cluster_ra = factor(as.integer(cluster_ra))
 )
 
-save_csv(traj_assign_ra, "traj_cluster_assignments_ra")
 
 png(file.path(out_dir, make_name("traj_ra_seqrplot_discrete", "png")), width = 1800, height = 2600, res = 160)
 TraMineR::seqrplot(
@@ -583,6 +587,7 @@ dev.off()
 
 analysis_ready <- analysis_ready %>%
   mutate(hospitalization_id = as.character(hospitalization_id)) %>%
+  dplyr::select(-any_of("traj_cluster_ra")) %>%
   left_join(traj_assign_ra, by = "hospitalization_id")
 
 # z-score exposures once
@@ -750,7 +755,7 @@ scores_df <- clif_tables[["clif_patient_assessments"]] %>%
   filter(!is.na(recorded_dttm), assessment_category == "gcs_total") %>%
   dplyr::select(hospitalization_id, recorded_dttm, assessment_category, numerical_value)
 
-safe_ts <- function(x) safe_posix(x)
+# safe_ts already defined in 01_lungcx_cohort.R
 
 sofa_scores <- calculate_sofa(
   cohort_data = sofa_cohort,
@@ -764,6 +769,8 @@ sofa_scores <- calculate_sofa(
 )
 
 analysis_ready <- analysis_ready %>%
+  dplyr::select(-any_of(c("sofa_total", "sofa_cv", "sofa_coag", "sofa_liver",
+                           "sofa_renal", "sofa_resp", "sofa_cns"))) %>%
   left_join(
     sofa_scores %>%
       transmute(
@@ -1088,9 +1095,10 @@ m_severity <- MASS::polr(
 landmark72 <- analysis_ready %>%
   mutate(
     t0_72 = admission_dttm + dhours(72),
+    surv_time_ref = dplyr::coalesce(death_ts, discharge_dttm),
     eligible72 = !is.na(discharge_dttm) & discharge_dttm > t0_72,
-    event_after72 = death_or_hospice & discharge_dttm > t0_72,
-    time_from72_h = as.numeric(difftime(discharge_dttm, t0_72, units = "hours"))
+    event_after72 = death_or_hospice & surv_time_ref > t0_72,
+    time_from72_h = as.numeric(difftime(surv_time_ref, t0_72, units = "hours"))
   ) %>%
   filter(eligible72, !is.na(traj_cluster_ra), !is.na(time_from72_h), time_from72_h >= 0)
 
@@ -1434,14 +1442,13 @@ save_csv(cor_tbl, "correlation_exposure_sofa")
 
 export_manifest <- tibble(
   category = c(
-    "clustering", "clustering", "clustering",
+    "clustering", "clustering",
     "static_summary", "static_summary", "static_summary",
     "trajectory_summary", "trajectory_summary",
     "model_output", "model_output", "model_output",
     "figure", "figure", "figure", "figure", "figure", "figure"
   ),
   file_stub = c(
-    "traj_cluster_assignments_ra",
     "cluster_silhouette_ra",
     "cluster_centroids_federated",
     "cluster_static_summary",
@@ -1460,7 +1467,6 @@ export_manifest <- tibble(
     "risk_difference_no2_by_cluster"
   ),
   description = c(
-    "Patient-level local cluster assignment (do not share outside site unless approved).",
     "Silhouette diagnostics for local cluster selection.",
     "Cluster-level centroids for central harmonization.",
     "Static cluster summaries including vasoactive mean use.",
